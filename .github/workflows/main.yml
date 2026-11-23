@@ -28,8 +28,12 @@ jobs:
           
           ls $BUILD_TOOLS
           
-          mkdir -p app/src/main/assets/www app/src/main/java/com/physics/app
+          # 创建目录结构
+          mkdir -p app/src/main/assets/www app/src/main/java/com/physics/app app/obj
+          
+          # 仅复制网页文件，排除隐藏目录和构建目录，防止循环引用
           cp -r * app/src/main/assets/www/ 2>/dev/null || true
+          rm -rf app/src/main/assets/www/.git app/src/main/assets/www/app app/src/main/assets/www/.github
           
           cat > app/src/main/AndroidManifest.xml <<'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.physics.app"><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="true" android:label="Physics" android:theme="@android:style/Theme.NoTitleBar"><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
@@ -40,14 +44,25 @@ jobs:
           JAVA
           
           cd app
+          # 编译 Java
           javac -d obj -cp "$PLATFORM_JAR" src/main/java/com/physics/app/*.java
+          # 转 Dex
           $BUILD_TOOLS/d8 --output=build/classes.dex obj/*.class
+          # 打包资源
           $BUILD_TOOLS/aapt package -f -M src/main/AndroidManifest.xml -A assets/www -I $PLATFORM_JAR -F unsigned.apk
+          # 加入 Dex
           $BUILD_TOOLS/aapt add unsigned.apk build/classes.dex || true
+          # 签名
           keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           $BUILD_TOOLS/apksigner sign --ks debug.keystore --ks-pass pass:android --out physics-app.apk unsigned.apk
-          mkdir -p ../app/build/outputs/apk/debug
-          cp physics-app.apk ../app/build/outputs/apk/debug/app-debug.apk
+          
+          mkdir -p build/outputs/apk/debug
+          cp physics-app.apk build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physics-web-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
       - uses: actions/upload-artifact@v4
         with:
