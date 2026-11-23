@@ -1,65 +1,73 @@
+name: Build Physics APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Manual Setup Android SDK & Build
+      - name: Setup Android SDK & Build
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq unzip wget rsync
-          
           export ANDROID_SDK_ROOT=/opt/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline.zip
-          unzip -q cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-          
+
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          # 仅安装核心，跳过 skins/emulator 等，加速构建
           sdkmanager "platforms;android-33" "build-tools;33.0.0"
-          
+
           BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/33.0.0
           PLATFORM_JAR=$ANDROID_SDK_ROOT/platforms/android-33/android.jar
-          
+
           BUILD_DIR=/tmp/apk_build
           rm -rf $BUILD_DIR
           mkdir -p $BUILD_DIR/src/main/assets/www $BUILD_DIR/src/main/java/com/physics/app $BUILD_DIR/obj $BUILD_DIR/build
-          
+
           rsync -a --exclude='.git' --exclude='.github' --exclude='android_build' ./ $BUILD_DIR/src/main/assets/www/
-          
+
           cat > $BUILD_DIR/src/main/AndroidManifest.xml <<'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.physics.app"><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="true" android:label="Physics" android:theme="@android:style/Theme.NoTitleBar"><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           MANIFEST
-          
+
           cat > $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
           package com.physics.app;import android.app.*;import android.os.*;import android.webkit.*;public class MainActivity extends Activity{@Override protected void onCreate(Bundle s){super.onCreate(s);WebView w=new WebView(this);WebSettings ws=w.getSettings();ws.setJavaScriptEnabled(true);ws.setAllowFileAccess(true);w.loadUrl("file:///android_asset/www/index.html");setContentView(w);}}
           JAVA
-          
+
           echo "--- Compiling Java ---"
           javac -d $BUILD_DIR/obj -cp "$PLATFORM_JAR" $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java
-          
-          # 精准定位生成的 class 文件（包含包目录）
+
           CLASS_FILE=$BUILD_DIR/obj/com/physics/app/MainActivity.class
           if [ ! -f "$CLASS_FILE" ]; then
             echo "ERROR: $CLASS_FILE not found!"
             exit 1
           fi
           echo "Found class file: $CLASS_FILE"
-          
-          echo "--- Converting to Dex (using d8) ---"
-          # 直接传具体文件，杜绝通配符导致的循环引用/找不到文件
+
+          echo "--- Converting to Dex (d8) ---"
           $BUILD_TOOLS/d8 --output=$BUILD_DIR/build $CLASS_FILE
-          
+
           echo "--- Packaging APK ---"
           $BUILD_TOOLS/aapt package -f -M $BUILD_DIR/src/main/AndroidManifest.xml -A $BUILD_DIR/src/main/assets/www -I $PLATFORM_JAR -F $BUILD_DIR/build/unsigned.apk
           $BUILD_TOOLS/aapt add $BUILD_DIR/build/unsigned.apk $BUILD_DIR/build/classes.dex || true
-          
+
           echo "--- Signing APK ---"
           keytool -genkey -v -keystore $BUILD_DIR/debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           $BUILD_TOOLS/apksigner sign --ks $BUILD_DIR/debug.keystore --ks-pass pass:android --out $BUILD_DIR/build/physics-app.apk $BUILD_DIR/build/unsigned.apk
-          
+
           cp $BUILD_DIR/build/physics-app.apk $GITHUB_WORKSPACE/app-debug.apk
           ls -lh $GITHUB_WORKSPACE/app-debug.apk
 
