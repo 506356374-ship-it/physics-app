@@ -26,45 +26,41 @@ jobs:
           BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/33.0.0
           PLATFORM_JAR=$ANDROID_SDK_ROOT/platforms/android-33/android.jar
           
-          ls $BUILD_TOOLS
+          # 彻底隔离：源码和构建产物全放 /tmp，避免循环引用
+          rm -rf /tmp/apk_build && mkdir -p /tmp/apk_build/src/main/assets/www /tmp/apk_build/src/main/java/com/physics/app /tmp/apk_build/obj
           
-          # 创建目录结构
-          mkdir -p app/src/main/assets/www app/src/main/java/com/physics/app app/obj
+          # 复制网页资源（排除隐藏文件和构建目录）
+          rsync -a --exclude='.git' --exclude='.github' --exclude='app' ./ /tmp/apk_build/src/main/assets/www/ || cp -r * /tmp/apk_build/src/main/assets/www/ 2>/dev/null || true
           
-          # 仅复制网页文件，排除隐藏目录和构建目录，防止循环引用
-          cp -r * app/src/main/assets/www/ 2>/dev/null || true
-          rm -rf app/src/main/assets/www/.git app/src/main/assets/www/app app/src/main/assets/www/.github
-          
-          cat > app/src/main/AndroidManifest.xml <<'MANIFEST'
+          cat > /tmp/apk_build/src/main/AndroidManifest.xml <<'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.physics.app"><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="true" android:label="Physics" android:theme="@android:style/Theme.NoTitleBar"><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           MANIFEST
           
-          cat > app/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
+          cat > /tmp/apk_build/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
           package com.physics.app;import android.app.*;import android.os.*;import android.webkit.*;public class MainActivity extends Activity{@Override protected void onCreate(Bundle s){super.onCreate(s);WebView w=new WebView(this);WebSettings ws=w.getSettings();ws.setJavaScriptEnabled(true);ws.setAllowFileAccess(true);w.loadUrl("file:///android_asset/www/index.html");setContentView(w);}}
           JAVA
           
-          cd app
-          # 编译 Java
+          cd /tmp/apk_build
+          # 清理并编译
+          rm -rf obj/*.class
           javac -d obj -cp "$PLATFORM_JAR" src/main/java/com/physics/app/*.java
-          # 转 Dex
+          
+          # 确认 class 文件存在再转 dex
+          ls -R obj/
           $BUILD_TOOLS/d8 --output=build/classes.dex obj/*.class
-          # 打包资源
-          $BUILD_TOOLS/aapt package -f -M src/main/AndroidManifest.xml -A assets/www -I $PLATFORM_JAR -F unsigned.apk
-          # 加入 Dex
+          
+          $BUILD_TOOLS/aapt package -f -M src/main/AndroidManifest.xml -A src/main/assets/www -I $PLATFORM_JAR -F unsigned.apk
           $BUILD_TOOLS/aapt add unsigned.apk build/classes.dex || true
-          # 签名
+          
           keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           $BUILD_TOOLS/apksigner sign --ks debug.keystore --ks-pass pass:android --out physics-app.apk unsigned.apk
           
-          mkdir -p build/outputs/apk/debug
-          cp physics-app.apk build/outputs/apk/debug/app-debug.apk
+          # 把最终 APK 放回工作区供上传
+          mkdir -p /home/runner/work/*/app/build/outputs/apk/debug
+          cp physics-app.apk /home/runner/work/*/app/build/outputs/apk/debug/app-debug.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: physics-web-apk
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: physics-web-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
