@@ -8,42 +8,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build WebView APK (No NPM/Gradle)
+      - name: Manual Setup Android SDK & Build
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq openjdk-17-jdk unzip wget
+          
           export ANDROID_SDK_ROOT=/opt/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline.zip
           unzip -q cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+          
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-33" "build-tools;33.0.0" >/dev/null 2>&1
-
+          sdkmanager "platforms;android-33" "build-tools;33.0.0"
+          
+          BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/33.0.0
+          PLATFORM_JAR=$ANDROID_SDK_ROOT/platforms/android-33/android.jar
+          
+          ls $BUILD_TOOLS
+          
           mkdir -p app/src/main/assets/www app/src/main/java/com/physics/app
           cp -r * app/src/main/assets/www/ 2>/dev/null || true
-
-          cat > app/build.gradle <<'GRADLE'
-          apply plugin: 'com.android.application'
-          android { compileSdkVersion 33; defaultConfig { minSdkVersion 21; targetSdkVersion 33; versionCode 1; versionName "1.0" } }
-          GRADLE
-
+          
           cat > app/src/main/AndroidManifest.xml <<'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.physics.app"><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="true" android:label="Physics" android:theme="@android:style/Theme.NoTitleBar"><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           MANIFEST
-
+          
           cat > app/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
           package com.physics.app;import android.app.*;import android.os.*;import android.webkit.*;public class MainActivity extends Activity{@Override protected void onCreate(Bundle s){super.onCreate(s);WebView w=new WebView(this);WebSettings ws=w.getSettings();ws.setJavaScriptEnabled(true);ws.setAllowFileAccess(true);w.loadUrl("file:///android_asset/www/index.html");setContentView(w);}}
           JAVA
-
+          
           cd app
-          ../$ANDROID_SDK_ROOT/build-tools/33.0.0/aapt package -f -M src/main/AndroidManifest.xml -A assets/www -I $ANDROID_SDK_ROOT/platforms/android-33/android.jar -F unsigned.apk || true
-          javac -d obj -cp "$ANDROID_SDK_ROOT/platforms/android-33/android.jar" src/main/java/com/physics/app/*.java
-          ../$ANDROID_SDK_ROOT/build-tools/33.0.0/d8 --output=build/classes.dex obj/*.class
-          ../$ANDROID_SDK_ROOT/build-tools/33.0.0/aapt add unsigned.apk build/classes.dex || true
+          javac -d obj -cp "$PLATFORM_JAR" src/main/java/com/physics/app/*.java
+          $BUILD_TOOLS/d8 --output=build/classes.dex obj/*.class
+          $BUILD_TOOLS/aapt package -f -M src/main/AndroidManifest.xml -A assets/www -I $PLATFORM_JAR -F unsigned.apk
+          $BUILD_TOOLS/aapt add unsigned.apk build/classes.dex || true
           keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          ../$ANDROID_SDK_ROOT/build-tools/33.0.0/apksigner sign --ks debug.keystore --ks-pass pass:android --out physics-app.apk unsigned.apk
+          $BUILD_TOOLS/apksigner sign --ks debug.keystore --ks-pass pass:android --out physics-app.apk unsigned.apk
           mkdir -p ../app/build/outputs/apk/debug
           cp physics-app.apk ../app/build/outputs/apk/debug/app-debug.apk
 
