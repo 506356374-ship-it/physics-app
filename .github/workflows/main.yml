@@ -19,6 +19,9 @@ jobs:
           sudo apt-get install -y unzip rsync imagemagick fonts-wqy-zenhei
           fc-cache -fv || true
 
+          # 解除 ImageMagick 策略限制（防图标生成失败）
+          sudo sed -i 's/<policy domain="coder" rights="none" pattern="PDF" \/>/<policy domain="coder" rights="read|write" pattern="PDF" \/>/g' /etc/ImageMagick-6/policy.xml || true
+
           export ANDROID_SDK_ROOT=/opt/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           curl -fsSL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
@@ -64,7 +67,7 @@ jobs:
             <application android:allowBackup="true" android:label="物理掌中学"
               android:icon="@mipmap/ic_launcher"
               android:theme="@android:style/Theme.NoTitleBar">
-              <activity android:name=".MainActivity">
+              <activity android:name=".MainActivity" android:exported="true">
                 <intent-filter>
                   <action android:name="android.intent.action.MAIN"/>
                   <category android:name="android.intent.category.LAUNCHER"/>
@@ -74,32 +77,45 @@ jobs:
           </manifest>
           MANIFEST
 
+          # ✅ 已修复：ws = w.getSettings() 补全了变量 w
           cat > $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
           package com.physics.app;
           import android.app.*;
           import android.os.*;
           import android.webkit.*;
-          public class MainActivity extends Activity{
-            @Override protected void onCreate(Bundle s){
+          public class MainActivity extends Activity {
+            @Override
+            protected void onCreate(Bundle s) {
               super.onCreate(s);
-              WebView w=new WebView(this);
-              WebSettings ws=.getSettings();
+              WebView w = new WebView(this);
+              WebSettings ws = w.getSettings();
               ws.setJavaScriptEnabled(true);
               ws.setAllowFileAccess(true);
+              ws.setDomStorageEnabled(true);
+              w.setWebViewClient(new WebViewClient());
               w.loadUrl("file:///android_asset/www/index.html");
               setContentView(w);
+            }
+            @Override
+            public void onBackPressed() {
+              WebView w = (WebView) findViewById(android.R.id.content);
+              if (w != null && w.canGoBack()) { w.goBack(); }
+              else { super.onBackPressed(); }
             }
           }
           JAVA
 
           echo "--- Compiling Java ---"
-          javac -d $BUILD_DIR/obj -cp "$PLATFORM_JAR" $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java
+          javac -source 8 -target 8 -encoding UTF-8 \
+                -d $BUILD_DIR/obj -cp "$PLATFORM_JAR" \
+                $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java
 
           CLASS_FILE=$BUILD_DIR/obj/com/physics/app/MainActivity.class
           if [ ! -f "$CLASS_FILE" ]; then
             echo "ERROR: $CLASS_FILE not found! Java compilation failed."
             exit 1
           fi
+          echo "Found class file: $CLASS_FILE"
 
           echo "--- Converting to Dex (d8) ---"
           $BUILD_TOOLS/d8 --output $BUILD_DIR/build $CLASS_FILE
@@ -117,11 +133,13 @@ jobs:
           cd $GITHUB_WORKSPACE
 
           echo "--- Signing APK ---"
-          keytool -genkey -v -keystore $BUILD_DIR/debug.keystore -alias androiddebugkey \
-            -storepass android -keypass android -keyalg RSA -validity 10000 \
+          keytool -genkeypair -v -keystore $BUILD_DIR/debug.keystore -alias androiddebugkey \
+            -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
           $BUILD_TOOLS/apksigner sign --ks $BUILD_DIR/debug.keystore --ks-pass pass:android \
+            --min-sdk-version 21 \
             --out $BUILD_DIR/build/physics-app.apk $BUILD_DIR/build/unsigned.apk
+          $BUILD_TOOLS/apksigner verify $BUILD_DIR/build/physics-app.apk
 
           cp $BUILD_DIR/build/physics-app.apk $GITHUB_WORKSPACE/app-debug.apk
           ls -lh $GITHUB_WORKSPACE/app-debug.apk
