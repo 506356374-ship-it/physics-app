@@ -1,0 +1,76 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "com.physics.learn"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.physics.learn"
+        minSdkVersion 22
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+            // 网页里 SVG / Blob / 中文文件名都不需要压缩，避免读不到资源
+            noCompress 'svg', 'html', 'js', 'css'
+        }
+    }
+
+    // —— 签名：本地从 keystore.properties 读；CI 从环境变量读 ——
+    signingConfigs {
+        release {
+            def props = new Properties()
+            def propFile = rootProject.file("keystore.properties")
+            if (propFile.exists()) {
+                props.load(new FileInputStream(propFile))
+                storeFile     file(props['storeFile'])
+                storePassword props['storePassword']
+                keyAlias      props['keyAlias']
+                keyPassword   props['keyPassword']
+            } else {
+                // CI / 无本地密钥：用环境变量
+                storeFile     file(System.getenv("KEYSTORE_PATH") ?: "release.jks")
+                storePassword System.getenv("KS_PASSWORD")
+                keyAlias      System.getenv("KEY_ALIAS")
+                keyPassword   System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+        debug {
+            // debug 使用 Android 自动生成的 ~/.android/debug.keystore，无需配置
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+repositories {
+    flatDir {
+        dirs 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.legacy:legacy-support-v4:1.0.0'
+    implementation 'androidx.webkit:webkit:1.10.0'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation project(':capacitor-android')
+}

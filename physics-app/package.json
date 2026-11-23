@@ -1,0 +1,23 @@
+{
+  "name": "physics-learn",
+  "version": "1.0.0",
+  "description": "初高中物理学习App · Capacitor 5 套壳工程（支持 GitHub Actions 云端打包 APK）",
+  "private": true,
+  "scripts": {
+    "build": "npm ci && npx cap add android || true && npx cap sync android",
+    "sync": "npx cap sync android",
+    "android:debug": "npm run sync && cd android && ./gradlew assembleDebug --no-daemon",
+    "android:release": "npm run sync && cd android && ./gradlew assembleRelease --no-daemon",
+    "android:clean": "cd android && ./gradlew clean --no-daemon"
+  },
+  "keywords": ["physics", "education", "capacitor", "android"],
+  "license": "MIT",
+  "devDependencies": {
+    "@capacitor/cli": "^5.7.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@capacitor/core": "^5.7.0",
+    "@capacitor/android": "^5.7.0"
+  }
+}

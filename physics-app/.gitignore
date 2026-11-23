@@ -1,0 +1,30 @@
+# OS / 编辑器
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# node
+node_modules/
+
+# android build
+android/app/build/
+android/.gradle/
+android/local.properties
+android/*.iml
+android/**/*.iml
+android/captures/
+android/gradlew
+android/gradlew.bat
+!android/gradlew.bat
+
+# 签名文件，绝对不能提交
+*.jks
+*.keystore
+android/keystore.properties
+keystore/
+
+# 临时文件
+*.b64
+*.log

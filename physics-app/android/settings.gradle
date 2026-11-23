@@ -1,0 +1,7 @@
+include ':app'
+
+def capAndroidDir = System.env.CAPACITOR_ANDROID_DIR ?: '..\\node_modules\\@capacitor\\android'
+def capAndroidDistDir = System.env.CAPACITOR_ANDROID_DIST_DIR ?: '..\\node_modules\\@capacitor\\android\\dist'
+
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File(capAndroidDir)
