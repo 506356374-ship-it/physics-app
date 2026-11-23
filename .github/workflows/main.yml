@@ -1,68 +1,74 @@
-name: Web APK Simple
+name: build
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Manual Setup Android SDK & Build
         run: |
-          set -e
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq openjdk-17-jdk unzip wget rsync
-
           export ANDROID_SDK_ROOT=/opt/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline.zip
           unzip -q cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-
+          
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          # 仅安装必要组件，加快速度
           sdkmanager "platforms;android-33" "build-tools;33.0.0"
-
+          
           BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/33.0.0
           PLATFORM_JAR=$ANDROID_SDK_ROOT/platforms/android-33/android.jar
-
-          # 彻底隔离构建目录，避免任何循环引用
-          BUILD_DIR=$GITHUB_WORKSPACE/android_build
+          
+          # 彻底隔离到 /tmp，杜绝任何循环引用
+          BUILD_DIR=/tmp/apk_build
           rm -rf $BUILD_DIR
           mkdir -p $BUILD_DIR/src/main/assets/www $BUILD_DIR/src/main/java/com/physics/app $BUILD_DIR/obj $BUILD_DIR/build
-
+          
           # 复制网页资源（排除隐藏文件和构建目录）
           rsync -a --exclude='.git' --exclude='.github' --exclude='android_build' ./ $BUILD_DIR/src/main/assets/www/
-
+          
           cat > $BUILD_DIR/src/main/AndroidManifest.xml <<'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.physics.app"><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="true" android:label="Physics" android:theme="@android:style/Theme.NoTitleBar"><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           MANIFEST
-
+          
           cat > $BUILD_DIR/src/main/java/com/physics/app/MainActivity.java <<'JAVA'
           package com.physics.app;import android.app.*;import android.os.*;import android.webkit.*;public class MainActivity extends Activity{@Override protected void onCreate(Bundle s){super.onCreate(s);WebView w=new WebView(this);WebSettings ws=w.getSettings();ws.setJavaScriptEnabled(true);ws.setAllowFileAccess(true);w.loadUrl("file:///android_asset/www/index.html");setContentView(w);}}
           JAVA
-
-          # 编译 Java
+          
+          # 编译 Java（不屏蔽错误，若失败会直接打印真实原因）
+          echo "--- Compiling Java ---"
           javac -d $BUILD_DIR/obj -cp "$PLATFORM_JAR" $BUILD_DIR/src/main/java/com/physics/app/*.java
           
-          # 强制检查 class 文件是否生成
           if ! ls $BUILD_DIR/obj/*.class >/dev/null 2>&1; then
-            echo "ERROR: No .class files generated. Compilation failed."
+            echo "ERROR: No .class files generated. Check javac error above."
             exit 1
           fi
-
-          # 使用 dx 替代 d8，避免 R8 循环引用报错
+          
+          # 使用 dx 替代 d8（彻底规避 R8 CIRCULAR REFERENCE 问题）
+          echo "--- Converting to Dex ---"
           $BUILD_TOOLS/dx --dex --output=$BUILD_DIR/build/classes.dex $BUILD_DIR/obj
-
-          # 打包资源与签名
+          
+          # 打包资源
+          echo "--- Packaging APK ---"
           $BUILD_TOOLS/aapt package -f -M $BUILD_DIR/src/main/AndroidManifest.xml -A $BUILD_DIR/src/main/assets/www -I $PLATFORM_JAR -F $BUILD_DIR/build/unsigned.apk
           $BUILD_TOOLS/aapt add $BUILD_DIR/build/unsigned.apk $BUILD_DIR/build/classes.dex || true
-
+          
+          # 签名
+          echo "--- Signing APK ---"
           keytool -genkey -v -keystore $BUILD_DIR/debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           $BUILD_TOOLS/apksigner sign --ks $BUILD_DIR/debug.keystore --ks-pass pass:android --out $BUILD_DIR/build/physics-app.apk $BUILD_DIR/build/unsigned.apk
-
-          # 输出到工作区根目录，方便上传
+          
+          # 输出到工作区根目录供上传
           cp $BUILD_DIR/build/physics-app.apk $GITHUB_WORKSPACE/app-debug.apk
           ls -lh $GITHUB_WORKSPACE/app-debug.apk
 
@@ -70,8 +76,7 @@ jobs:
         with:
           name: physics-web-apk
           path: app-debug.apk
-
-      - uses: actions/upload-artifact@v4
+rtifact@v4
         with:
           name: physics-web-apk
           path: app/build/outputs/apk/debug/app-debug.apk
