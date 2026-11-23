@@ -16,15 +16,16 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-           - name: Setup Android SDK & Build
+      - name: Setup Android SDK & Build
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y unzip rsync openjdk-17-jdk >/dev/null 2>&1 || true
+          set -e
+          sudo apt-get update -qq >/dev/null 2>&1 || true
+          sudo apt-get install -y openjdk-17-jdk rsync >/dev/null 2>&1 || true
           
           export ANDROID_SDK_ROOT=/opt/android-sdk
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
+          cd $ANDROID_SDK_ROOT/cmdline-tools
+          curl -fsSL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
@@ -54,18 +55,22 @@ jobs:
 
           CLASS_FILE=$BUILD_DIR/obj/com/physics/app/MainActivity.class
           if [ ! -f "$CLASS_FILE" ]; then
-            echo "ERROR: $CLASS_FILE not found!"
+            echo "ERROR: $CLASS_FILE not found! Java compilation failed."
             exit 1
           fi
           echo "Found class file: $CLASS_FILE"
 
-          echo "--- Converting to Dex (Native d8.jar) ---"
-          # 彻底绕过系统 d8 包装，直接用 java 调用原版 d8.jar，输出到目录
-          java -jar $BUILD_TOOLS/lib/d8.jar --output $BUILD_DIR/build $CLASS_FILE
+          echo "--- Converting to Dex (using d8 wrapper) ---"
+          # 使用官方 d8 包装脚本，--output 与路径用空格分隔，彻底规避参数解析错误
+          $BUILD_TOOLS/d8 --output $BUILD_DIR/build $CLASS_FILE
 
           echo "--- Packaging APK ---"
           $BUILD_TOOLS/aapt package -f -M $BUILD_DIR/src/main/AndroidManifest.xml -A $BUILD_DIR/src/main/assets/www -I $PLATFORM_JAR -F $BUILD_DIR/build/unsigned.apk
-          $BUILD_TOOLS/aapt add $BUILD_DIR/build/unsigned.apk $BUILD_DIR/build/classes.dex || true
+          
+          # 必须进入目录用相对路径添加，否则 aapt 会把绝对路径写进 APK 导致安装失败
+          cd $BUILD_DIR/build
+          $BUILD_TOOLS/aapt add unsigned.apk classes.dex || true
+          cd $GITHUB_WORKSPACE
 
           echo "--- Signing APK ---"
           keytool -genkey -v -keystore $BUILD_DIR/debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
